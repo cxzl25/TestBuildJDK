@@ -1,0 +1,93 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+name: "Build JDK 25 for Linux x64"
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/build-jdk25-linux-x64.yaml'
+  workflow_dispatch:
+    inputs:
+      jdk_repo:
+        description: "JDK Git repository URL (e.g., https://github.com/openjdk/jdk.git)"
+        required: false
+        default: "https://github.com/openjdk/jdk.git"
+      jdk_ref:
+        description: "JDK commit/branch/tag to build (e.g., jdk-25+11, master, or commit SHA)"
+        required: false
+        default: "jdk-25+11"
+      build_variant:
+        description: "Build variant (server, client, minimal)"
+        required: false
+        default: "server"
+
+jobs:
+  build-jdk25-linux-x64:
+    runs-on: ubuntu-22.04
+    
+    permissions:
+      contents: read
+      actions: read
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Build JDK 25 in CentOS 7 Docker container
+        run: |
+          JDK_REPO="${{ github.event.inputs.jdk_repo || 'https://github.com/openjdk/jdk.git' }}"
+          JDK_REF="${{ github.event.inputs.jdk_ref || 'jdk-25+11' }}"
+          BUILD_VARIANT="${{ github.event.inputs.build_variant || 'server' }}"
+          
+          docker build \
+            --build-arg JDK_REPO="${JDK_REPO}" \
+            --build-arg JDK_REF="${JDK_REF}" \
+            --build-arg BUILD_VARIANT="${BUILD_VARIANT}" \
+            -t jdk25-builder \
+            docker/jdk25-linux-x64/
+      
+      - name: Extract JDK artifact from Docker image
+        run: |
+          docker create --name jdk25-extract jdk25-builder
+          docker cp jdk25-extract:/build/commit_sha.txt ./commit_sha.txt
+          COMMIT_SHA=$(cat ./commit_sha.txt)
+          echo "Extracting jdk25-linux-x64-${COMMIT_SHA}.tar.gz"
+          docker cp "jdk25-extract:/build/jdk25-linux-x64-${COMMIT_SHA}.tar.gz" "./jdk25-linux-x64-${COMMIT_SHA}.tar.gz"
+          docker rm jdk25-extract
+          rm -f ./commit_sha.txt
+      
+      - name: Upload JDK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jdk25-linux-x64
+          path: jdk25-linux-x64-*.tar.gz
+          retention-days: 7
+      
+      - name: Display build summary
+        run: |
+          echo "### JDK 25 Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Platform**: Linux x64 (64-bit)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build Environment**: CentOS 7 Docker (glibc 2.17)" >> $GITHUB_STEP_SUMMARY
+          echo "- **JDK Repository**: ${{ github.event.inputs.jdk_repo || 'https://github.com/openjdk/jdk.git' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **JDK Reference**: ${{ github.event.inputs.jdk_ref || 'jdk-25+11' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **JVM Variant**: ${{ github.event.inputs.build_variant || 'server' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Boot JDK**: Java 25 EA (Temurin)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Build completed successfully! ✅" >> $GITHUB_STEP_SUMMARY
+
